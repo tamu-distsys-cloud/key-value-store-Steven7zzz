@@ -14,6 +14,9 @@ class Clerk:
         self.cfg = cfg
 
         # Your definitions here.
+        self.client_id = nrand()
+        self.seq = 0
+        self.mu = threading.Lock() # for concurrency 
 
     # Fetch the current value for a key.
     # Returns "" if the key does not exist.
@@ -28,7 +31,20 @@ class Clerk:
     # arguments in server.py.
     def get(self, key: str) -> str:
         # You will have to modify this function.
-        return ""
+        args = GetArgs(key)
+        with self.mu:
+            args.client_id = self.client_id
+            args.seq = self.seq
+            self.seq += 1
+
+        # retry forever over all known servers, move to next server when timeout
+        while True:
+            for srv in self.servers:
+                try:
+                    reply: GetReply = srv.call("KVServer.Get", args)
+                    return reply.value
+                except TimeoutError:
+                    continue
 
     # Shared by Put and Append.
     #
@@ -41,7 +57,20 @@ class Clerk:
     # arguments in server.py.
     def put_append(self, key: str, value: str, op: str) -> str:
         # You will have to modify this function.
-        return ""
+        args = PutAppendArgs(key, value)
+        with self.mu:
+            args.client_id = self.client_id
+            args.seq = self.seq
+            self.seq += 1
+
+        # similar to get, return whatever server returns
+        while True:
+            for srv in self.servers:
+                try:
+                    reply: PutAppendReply = srv.call(f"KVServer.{op}", args)
+                    return reply.value
+                except TimeoutError:
+                    continue
 
     def put(self, key: str, value: str):
         self.put_append(key, value, "Put")
