@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from typing import Tuple, Any
 
 debugging = False
@@ -50,6 +51,22 @@ class KVServer:
         reply = GetReply(None)
 
         # Your code here.
+        total_shards   = self.cfg.nservers
+        replicas_per_shard = self.cfg.nreplicas
+        if total_shards > 1:
+            server_id = self.cfg.kvservers.index(self)
+            shards = []
+            for r in range(replicas_per_shard):
+                shard_id = (server_id - r) % total_shards
+                shards.append(shard_id)
+            try:
+                key = int(args.key)
+                shard = key % total_shards
+            except ValueError:
+                shard = 0
+            if shard not in shards:
+                raise Exception("wrong shard")  
+         
         key = (args.client_id, args.seq)
         with self.mu: # lock once per request 
             if key in self.cache: # if seen the same id and seq before, just return cached
@@ -61,7 +78,7 @@ class KVServer:
         return reply
 
     def Put(self, args: PutAppendArgs):
-        reply = PutAppendReply("")
+        reply = PutAppendReply(None)
 
         # Your code here.
         key = (args.client_id, args.seq)

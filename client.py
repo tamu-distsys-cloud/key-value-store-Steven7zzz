@@ -18,6 +18,19 @@ class Clerk:
         self.seq = 0
         self.mu = threading.Lock() # for concurrency 
 
+        self.total_shards   = cfg.nservers
+        self.replicas_per_shard = cfg.nreplicas
+
+        # build each shard’s replica group with wrap around
+        self.servers_by_shard: List[List[ClientEnd]] = []
+        n = len(self.servers)
+        for shard in range(self.total_shards):
+            grp = []
+            for r in range(self.replicas_per_shard):
+                idx = (shard + r) % n
+                grp.append(self.servers[idx])
+            self.servers_by_shard.append(grp)
+
     # Fetch the current value for a key.
     # Returns "" if the key does not exist.
     # Keeps trying forever in the face of all other errors.
@@ -37,9 +50,15 @@ class Clerk:
             args.seq = self.seq
             self.seq += 1
 
+        # signle or multi shard
+        if self.total_shards == 1:
+            shard = 0
+        else:
+            shard = int(key) % self.total_shards
+
         # retry forever over all known servers, move to next server when timeout
         while True:
-            for srv in self.servers:
+            for srv in self.servers_by_shard[shard]:
                 try:
                     reply: GetReply = srv.call("KVServer.Get", args)
                     return reply.value
@@ -63,14 +82,22 @@ class Clerk:
             args.seq = self.seq
             self.seq += 1
 
+        # signle or multi shard
+        if self.total_shards == 1:
+            shard = 0
+        else:
+            shard = int(key) % self.total_shards
+
         # similar to get, return whatever server returns
-        while True:
-            for srv in self.servers:
+        for srv in self.servers_by_shard[shard]:
+            while True:
                 try:
                     reply: PutAppendReply = srv.call(f"KVServer.{op}", args)
-                    return reply.value
+                    break
                 except TimeoutError:
                     continue
+        # only return when all replicas are apllied
+        return reply.value
 
     def put(self, key: str, value: str):
         self.put_append(key, value, "Put")
